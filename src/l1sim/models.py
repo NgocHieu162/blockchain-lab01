@@ -225,7 +225,7 @@ class BlockWithCertificate:
     def __post_init__(self) -> None:
         if not isinstance(self.block, Block) or not isinstance(self.certificate, CommitCertificate):
             raise ValueError("block and certificate have invalid types")
-        
+
         if self.certificate.height != self.block.header.height:
             raise ValueError("certificate height does not match block height")
         # Delay this import because encoding imports the shared data types.
@@ -272,28 +272,28 @@ class Message:
         _check_height("height", self.height)
         if not isinstance(self.payload, _PAYLOAD_TYPES[self.kind]):
             raise ValueError(f"payload does not match message kind {self.kind.value}")
-        
+
         if self.kind is Kind.HELLO and self.payload.node_id != self.origin:
             raise ValueError("HELLO node_id must match message origin")
 
         payload_height = None
         if self.kind is Kind.HEADER:
             payload_height = self.payload.height
-            
+
         elif self.kind is Kind.VOTE:
             payload_height = self.payload.height
-            
+
         elif self.kind is Kind.BODY:
             payload_height = self.payload.header.height
-            
+
         elif self.kind is Kind.HELLO:
             payload_height = self.payload.finalized_height
-            
+
         elif self.kind is Kind.GET_BLOCKS:
             payload_height = self.payload.from_height
-            
+
         elif self.kind is Kind.BLOCKS and self.payload.blocks:
             payload_height = self.payload.blocks[0].block.header.height
-            
+
         if payload_height is not None and self.height != payload_height:
             raise ValueError("message height does not match payload height")

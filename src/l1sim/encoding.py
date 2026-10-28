@@ -167,10 +167,10 @@ def decode(data: bytes) -> Message:
 
     try:
         value = json.loads(data.decode("utf-8"))
-        
+
         if not isinstance(value, dict) or set(value) != {"kind", "origin", "height", "payload"}:
             raise ValueError("invalid Message fields")
-        
+
         kind = Kind(value["kind"])
         message = Message(
             kind,
