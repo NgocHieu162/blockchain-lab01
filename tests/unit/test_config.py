@@ -15,6 +15,15 @@ def test_load_genesis_and_t1_scenario():
     assert len(genesis.validators) == 10
     assert scenario.name == "t1_normal"
     assert len(scenario.transactions) == 20
+    assert scenario.consensus.timeout_delta_ms == 300
+
+
+def test_load_default_scenario():
+    scenario = load_scenario(ROOT / "config/default.json")
+
+    assert scenario.chain_id == "lab01"
+    assert scenario.num_validators == 10
+    assert scenario.consensus.timeout_delta_ms == 300
 
 
 def test_config_rejects_wrong_chain_id(tmp_path):

@@ -20,6 +20,8 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class NetworkConfig:
+    """Network timing and fault-injection settings."""
+
     min_delay_ms: int = 10
     max_delay_ms: int = 200
     drop_rate: float = 0.0
@@ -31,13 +33,18 @@ class NetworkConfig:
 
 @dataclass(frozen=True, slots=True)
 class ConsensusConfig:
+    """Consensus timeout settings."""
+
     timeout_propose_ms: int = 1000
     timeout_prevote_ms: int = 1000
     timeout_precommit_ms: int = 1000
+    timeout_delta_ms: int = 300
 
 
 @dataclass(frozen=True, slots=True)
 class DiscoveryConfig:
+    """Peer discovery multicast settings."""
+
     multicast_group: str = "239.1.1.1"
     multicast_port: int = 50000
     beacon_interval_ms: int = 1000
@@ -46,6 +53,8 @@ class DiscoveryConfig:
 
 @dataclass(frozen=True, slots=True)
 class GenesisConfig:
+    """Validated genesis configuration."""
+
     chain_id: str
     seed: int
     validators: tuple[str, ...]
@@ -54,6 +63,8 @@ class GenesisConfig:
 
 @dataclass(frozen=True, slots=True)
 class ScenarioConfig:
+    """Validated scenario configuration."""
+
     name: str
     chain_id: str
     seed: int
@@ -128,6 +139,8 @@ def _port(mapping: dict[str, Any], name: str, default: int) -> int:
 
 
 def load_genesis(path: str | Path = "config/genesis.json") -> GenesisConfig:
+    """Load and validate a genesis configuration file."""
+
     raw = _read_json(path)
     chain_id = raw.get("chain_id")
     if chain_id != CHAIN_ID:
@@ -153,7 +166,7 @@ def load_genesis(path: str | Path = "config/genesis.json") -> GenesisConfig:
                 raise ConfigError(f"invalid public_key for validator {node_id}")
             public_keys[node_id] = public_key
         else:
-            raise ConfigError("each validator must be an {id, public_key} object")  # dict object
+            raise ConfigError("each validator must be an {id, public_key} object")
 
     if len(set(validators)) != len(validators):
         raise ConfigError("validator ids must be unique")
@@ -171,6 +184,8 @@ def load_genesis(path: str | Path = "config/genesis.json") -> GenesisConfig:
 
 
 def load_scenario(path: str | Path) -> ScenarioConfig:
+    """Load and validate a scenario configuration file."""
+
     raw = _read_json(path)
     name = raw.get("name") or Path(path).stem
     if not isinstance(name, str) or not name:
@@ -180,9 +195,7 @@ def load_scenario(path: str | Path) -> ScenarioConfig:
         raise ConfigError(f"scenario chain_id must be {CHAIN_ID!r}")
 
     seed = _required_int(raw, "seed")
-    num_validators = _required_int(
-        raw, "num_validators", 1
-    )  # ko nhat quan lam nhung co kiem tra lai phia duoi
+    num_validators = _required_int(raw, "num_validators", 1)
     if num_validators < 8 or (num_validators - 1) % 3 != 0:
         raise ConfigError("num_validators must follow n = 3f + 1 and be at least 8")
     max_height = _required_int(raw, "max_height", 1)
@@ -256,6 +269,7 @@ def load_scenario(path: str | Path) -> ScenarioConfig:
         timeout_propose_ms=_optional_int(consensus_raw, "timeout_propose_ms", 1000, 1),
         timeout_prevote_ms=_optional_int(consensus_raw, "timeout_prevote_ms", 1000, 1),
         timeout_precommit_ms=_optional_int(consensus_raw, "timeout_precommit_ms", 1000, 1),
+        timeout_delta_ms=_optional_int(consensus_raw, "timeout_delta_ms", 300, 1),
     )
 
     warmup_ms = _optional_int(raw, "warmup_ms", 1000)
