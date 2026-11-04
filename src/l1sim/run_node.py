@@ -43,8 +43,6 @@ async def run_node(
             raise ValueError(f"{node_id!r} is not a validator")
         if not math.isfinite(timeout_s) or timeout_s <= 0:
             raise ValueError("timeout must be finite and positive")
-        if scenario.network.drop_rate or scenario.network.duplicate_rate:
-            raise ValueError("fault injection sender integration is pending task 9 (C + B)")
         if scenario.byzantine:
             raise ValueError("Byzantine runtime integration is deferred; use an honest scenario")
         peers = dict(scenario.network.peers) or {
