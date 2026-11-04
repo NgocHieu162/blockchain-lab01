@@ -469,3 +469,184 @@ def test_stop_inside_on_finalize_keeps_the_finalized_height():
     assert engine.height == 1
     assert engine.parent_hash == block_hash(block.header)
     assert all(vote.height == 1 for vote in net.votes_sent("V0"))
+
+
+def _lock_v0_on_round_0_block():
+    """V0 alone (every delivery dropped) sees a polka for the round-0 proposal and locks it."""
+    net = Network(4, drop=lambda src, dst, message: True)
+    net.start(only=["V0"])
+    engine = net.engines["V0"]
+    proposer = proposer_for(net.ids, 1, 0)
+    block = net.make_block(proposer, 1, 0, sample_txs()[:1], parent_hash=GENESIS_HASH)
+    net.deliver("V0", Message(Kind.BODY, proposer, 1, block))
+    for voter in ("V2", "V3"):
+        vote = net.make_vote(voter, Phase.PREVOTE, 1, 0, block_hash(block.header))
+        net.deliver("V0", Message(Kind.VOTE, voter, 1, vote))
+    return net, engine, block
+
+
+def _votes(net, node, phase, round):
+    return [v.block_hash for v in net.votes_sent(node) if v.phase is phase and v.round == round]
+
+
+def test_precommit_on_a_polka_locks_the_block():
+    net, engine, block = _lock_v0_on_round_0_block()
+
+    assert _votes(net, "V0", Phase.PRECOMMIT, 0) == [block_hash(block.header)]
+    assert engine.locked_block == block and engine.locked_round == 0
+    assert "lock" in net.event_names("V0")
+
+
+def test_lock_survives_rounds_and_locked_block_is_prevoted():
+    net, engine, block = _lock_v0_on_round_0_block()
+    assert net.clock.run(lambda: engine.round == 1)
+    proposer = proposer_for(net.ids, 1, 1)
+    other = net.make_block(proposer, 1, 1, sample_txs()[:2], parent_hash=GENESIS_HASH)
+    net.deliver("V0", Message(Kind.BODY, proposer, 1, other))
+
+    assert _votes(net, "V0", Phase.PREVOTE, 1) == [block_hash(block.header)]
+    assert engine.locked_block == block  # a timeout never releases the lock
+    _assert_no_double_sign(net)
+
+
+def test_locked_proposer_re_proposes_its_block():
+    net, engine, block = _lock_v0_on_round_0_block()
+    round = next(r for r in range(1, 8) if proposer_for(net.ids, 1, r) == "V0")
+
+    assert net.clock.run(lambda: engine.round == round)
+    proposals = [m.payload for src, m in net.sent if src == "V0" and m.kind is Kind.BODY]
+    assert proposals == [block]  # the same block, original header and hash
+    assert "repropose" in net.event_names("V0")
+    assert _votes(net, "V0", Phase.PREVOTE, round) == [block_hash(block.header)]
+
+
+def test_polka_in_the_current_round_moves_the_lock():
+    net, engine, block = _lock_v0_on_round_0_block()
+    assert net.clock.run(lambda: engine.round == 1 and engine.step is Step.PREVOTE)
+    proposer = proposer_for(net.ids, 1, 1)
+    other = net.make_block(proposer, 1, 1, sample_txs()[:2], parent_hash=GENESIS_HASH)
+    net.deliver("V0", Message(Kind.BODY, proposer, 1, other))
+    for voter in ("V1", "V2", "V3"):
+        vote = net.make_vote(voter, Phase.PREVOTE, 1, 1, block_hash(other.header))
+        net.deliver("V0", Message(Kind.VOTE, voter, 1, vote))
+
+    assert _votes(net, "V0", Phase.PRECOMMIT, 1) == [block_hash(other.header)]
+    assert engine.locked_block == other and engine.locked_round == 1
+
+
+def test_late_polka_from_a_newer_round_unlocks_in_the_next_round():
+    """Concept Guide, 'Ba mốc round': locked on B at round 0, a polka for C at round 1
+    arrives after V0 precommitted NIL; in round 2 V0 may prevote C (1 > locked_round 0)."""
+    net, engine, block = _lock_v0_on_round_0_block()
+    assert net.clock.run(lambda: engine.round == 1 and engine.step is Step.PRECOMMIT)
+    proposer = proposer_for(net.ids, 1, 1)
+    other = net.make_block(proposer, 1, 1, sample_txs()[:2], parent_hash=GENESIS_HASH)
+    net.deliver("V0", Message(Kind.BODY, proposer, 1, other))
+    for voter in ("V1", "V2", "V3"):
+        vote = net.make_vote(voter, Phase.PREVOTE, 1, 1, block_hash(other.header))
+        net.deliver("V0", Message(Kind.VOTE, voter, 1, vote))
+    assert engine.locked_block == block  # seeing the polka late does not move the lock
+
+    assert net.clock.run(lambda: engine.round == 2)
+    assert _votes(net, "V0", Phase.PREVOTE, 2) == [block_hash(other.header)]
+
+
+def test_locking_keeps_safety_when_round_0_precommits_are_lost():
+    """Concept Guide counter-example: V0 finalizes B in round 0, the others miss the
+    precommits. Without locking they would finalize the round-1 proposal instead."""
+
+    def drop(src, dst, message):
+        vote = message.payload
+        return (
+            message.kind is Kind.VOTE
+            and vote.phase is Phase.PRECOMMIT
+            and vote.round == 0
+            and dst != "V0"
+        )
+
+    net = Network(4, txs=sample_txs(), drop=drop)
+    net.start()
+
+    assert net.run_until_height(1)
+    first = {net.hashes(node)[0] for node in net.ids}
+    assert len(first) == 1, "two different blocks finalized at height 1"
+    assert net.run_until_height(2)
+    assert net.finalized["V0"][0][1].precommits[0].round == 0
+    assert net.finalized["V1"][0][1].precommits[0].round >= 1
+    _assert_no_double_sign(net)
+
+
+def _partial_polka_network():
+    """PR #22 review, P1: 10 honest nodes, only V0–V3 get the round-0 prevotes.
+
+    V0–V3 see the polka for the round-0 block and lock it; every round-0
+    precommit is lost. From round 1 on, everything is delivered.
+    """
+    lockers = {"V0", "V1", "V2", "V3"}
+    net = None
+
+    def drop(src, dst, message):
+        if message.kind is not Kind.VOTE or net.engines[src].round != 0:
+            return False
+        return message.payload.phase is Phase.PRECOMMIT or dst not in lockers
+
+    net = Network(10, txs=sample_txs(), drop=drop)
+    return net, lockers
+
+
+def test_polka_evidence_lets_nodes_that_missed_the_polka_converge():
+    net, lockers = _partial_polka_network()
+    net.start()
+
+    assert net.run_until_height(1, max_ms=30_000)
+    assert len({net.hashes(node)[0] for node in net.ids}) == 1
+    block = net.finalized["V0"][0][0]
+    assert block.header.round == 0  # the block V0–V3 locked, not a newer one
+    assert all(net.finalized[node][0][1].precommits[0].round <= 2 for node in net.ids)
+    assert all("polka_evidence" in net.event_names(node) for node in lockers)
+    _assert_no_double_sign(net)
+
+
+def test_without_polka_evidence_the_partial_polka_stalls(monkeypatch):
+    """Control for the test above: the old behaviour never finalizes height 1."""
+    monkeypatch.setattr(ConsensusEngine, "_send_polka_evidence", lambda self: None)
+    net, _ = _partial_polka_network()
+    net.start()
+
+    assert not net.run_until_height(1, max_ms=30_000)
+
+
+def test_round_skip_needs_f_plus_one_validators_in_the_higher_round():
+    net = Network(4, drop=lambda src, dst, message: True)
+    net.start(only=["V0"])
+    engine = net.engines["V0"]
+
+    one = net.make_vote("V1", Phase.PREVOTE, 1, 3, None)
+    net.deliver("V0", Message(Kind.VOTE, "V1", 1, one))
+    assert engine.round == 0  # f = 1 voter could be Byzantine
+
+    two = net.make_vote("V2", Phase.PRECOMMIT, 1, 3, None)
+    net.deliver("V0", Message(Kind.VOTE, "V2", 1, two))
+    assert engine.round == 3
+    assert ("round_skip", 3) in [(e, f.get("to_round")) for e, f in net.events["V0"]]
+
+
+def test_conflicting_proposal_that_gets_committed_is_still_finalized():
+    """An equivocating proposer's second block reaches V0 first; the others commit the first one."""
+    net = Network(4, drop=lambda src, dst, message: True)
+    net.start(only=["V0"])
+    engine = net.engines["V0"]
+    proposer = proposer_for(net.ids, 1, 0)
+    committed = net.make_block(proposer, 1, 0, sample_txs()[:1], parent_hash=GENESIS_HASH)
+    other = net.make_block(proposer, 1, 0, sample_txs()[:2], parent_hash=GENESIS_HASH)
+
+    net.deliver("V0", Message(Kind.BODY, proposer, 1, other))
+    net.deliver("V0", Message(Kind.BODY, proposer, 1, committed))
+    digest = block_hash(committed.header)
+    for voter in ("V1", "V2", "V3"):
+        vote = net.make_vote(voter, Phase.PRECOMMIT, 1, 0, digest)
+        net.deliver("V0", Message(Kind.VOTE, voter, 1, vote))
+
+    assert net.hashes("V0") == [digest]
+    assert engine.height == 2
+    assert "commit_waiting_for_block" not in net.event_names("V0")

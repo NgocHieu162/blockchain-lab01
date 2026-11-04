@@ -43,8 +43,6 @@ async def run_node(
             raise ValueError(f"{node_id!r} is not a validator")
         if not math.isfinite(timeout_s) or timeout_s <= 0:
             raise ValueError("timeout must be finite and positive")
-        if scenario.byzantine:
-            raise ValueError("Byzantine runtime integration is deferred; use an honest scenario")
         peers = dict(scenario.network.peers) or {
             validator: f"127.0.0.1:{base_port + index}"
             for index, validator in enumerate(genesis.validators)

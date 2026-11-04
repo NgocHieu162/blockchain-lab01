@@ -25,7 +25,7 @@ def test_load_config_accepts_any_validator_count_at_least_eight(tmp_path, n):
         "num_validators": n,
         "validators": validators,
         "max_height": 1,
-        "byzantine": validators[: (n - 1) // 3],
+        "byzantine": [{"node": v, "behavior": "silent"} for v in validators[: (n - 1) // 3]],
     }
     genesis_path = tmp_path / "genesis.json"
     scenario_path = tmp_path / "scenario.json"
@@ -34,10 +34,11 @@ def test_load_config_accepts_any_validator_count_at_least_eight(tmp_path, n):
     loaded_genesis, loaded_scenario = load_config(scenario_path, genesis_path)
     assert loaded_genesis.validators == tuple(validators)
     assert loaded_scenario.num_validators == n
+    assert len(loaded_scenario.byzantine) == (n - 1) // 3
 
-    scenario["byzantine"].append(validators[(n - 1) // 3])
+    scenario["byzantine"].append({"node": validators[(n - 1) // 3], "behavior": "silent"})
     scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
-    with pytest.raises(ConfigError, match="Byzantine"):
+    with pytest.raises(ConfigError, match="at most f"):
         load_scenario(scenario_path)
 
 
