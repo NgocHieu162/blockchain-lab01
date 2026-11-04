@@ -27,9 +27,8 @@ def available_base_port():
 
 
 @pytest.mark.e2e
-@pytest.mark.parametrize("duplicate_rate", [0.0, 0.3])
-def test_validator_processes_finalize_and_repeat_identically(tmp_path, duplicate_rate):
-    n = 10
+@pytest.mark.parametrize(("n", "duplicate_rate"), [(8, 0.0), (9, 0.0), (10, 0.0), (10, 0.3)])
+def test_validator_processes_finalize_and_repeat_identically(tmp_path, n, duplicate_rate):
     previous = None
     for run in range(2):
         workdir = tmp_path / str(run)

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,53 @@ import pytest
 from l1sim.config import ConfigError, load_config, load_genesis, load_scenario
 
 ROOT = Path(__file__).parents[2]
+
+
+@pytest.mark.parametrize("n", [8, 9, 10, 11, 12, 13])
+def test_load_config_accepts_any_validator_count_at_least_eight(tmp_path, n):
+    from l1sim.crypto import keypair_from_seed
+
+    validators = [f"V{i}" for i in range(n)]
+    genesis = {
+        "chain_id": "lab01",
+        "seed": 42,
+        "validators": [
+            {"id": v, "public_key": keypair_from_seed(42, v).public_bytes.hex()} for v in validators
+        ],
+    }
+    scenario = {
+        "seed": 42,
+        "num_validators": n,
+        "validators": validators,
+        "max_height": 1,
+        "byzantine": validators[: (n - 1) // 3],
+    }
+    genesis_path = tmp_path / "genesis.json"
+    scenario_path = tmp_path / "scenario.json"
+    genesis_path.write_text(json.dumps(genesis), encoding="utf-8")
+    scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
+    loaded_genesis, loaded_scenario = load_config(scenario_path, genesis_path)
+    assert loaded_genesis.validators == tuple(validators)
+    assert loaded_scenario.num_validators == n
+
+    scenario["byzantine"].append(validators[(n - 1) // 3])
+    scenario_path.write_text(json.dumps(scenario), encoding="utf-8")
+    with pytest.raises(ConfigError, match="Byzantine"):
+        load_scenario(scenario_path)
+
+
+@pytest.mark.parametrize("n", [1, 4, 7])
+def test_config_rejects_fewer_than_eight_validators(tmp_path, n):
+    genesis = json.loads((ROOT / "config/genesis.json").read_text())
+    genesis["validators"] = genesis["validators"][:n]
+    genesis_path = tmp_path / "genesis.json"
+    genesis_path.write_text(json.dumps(genesis), encoding="utf-8")
+    scenario_path = tmp_path / "scenario.json"
+    scenario_path.write_text(json.dumps({"seed": 42, "num_validators": n}))
+    with pytest.raises(ConfigError, match="at least 8"):
+        load_genesis(genesis_path)
+    with pytest.raises(ConfigError, match="at least 8"):
+        load_scenario(scenario_path)
 
 
 def test_load_genesis_and_t1_scenario():

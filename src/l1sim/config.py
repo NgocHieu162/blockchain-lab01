@@ -171,8 +171,8 @@ def load_genesis(path: str | Path = "config/genesis.json") -> GenesisConfig:
 
     if len(set(validators)) != len(validators):
         raise ConfigError("validator ids must be unique")
-    if len(validators) < 8 or (len(validators) - 1) % 3 != 0:
-        raise ConfigError("validators must follow n = 3f + 1 and contain at least 8 nodes")
+    if len(validators) < 8:
+        raise ConfigError("validators must contain at least 8 nodes")
 
     from l1sim.crypto import keypair_from_seed
 
@@ -197,8 +197,8 @@ def load_scenario(path: str | Path) -> ScenarioConfig:
 
     seed = _required_int(raw, "seed")
     num_validators = _required_int(raw, "num_validators", 1)
-    if num_validators < 8 or (num_validators - 1) % 3 != 0:
-        raise ConfigError("num_validators must follow n = 3f + 1 and be at least 8")
+    if num_validators < 8:
+        raise ConfigError("num_validators must be at least 8")
     max_height = _required_int(raw, "max_height", 1)
 
     validators = raw.get("validators", [f"V{i}" for i in range(num_validators)])
