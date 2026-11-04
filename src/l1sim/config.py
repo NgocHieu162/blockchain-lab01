@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import re
 from dataclasses import dataclass, field
@@ -28,7 +27,6 @@ class NetworkConfig:
     duplicate_rate: float = 0.0
     gst_height: int = 0
     delta_ms: int = 500
-    target_degree: int = 4
     peers: dict[str, str] = field(default_factory=dict)
 
 
@@ -40,16 +38,6 @@ class ConsensusConfig:
     timeout_prevote_ms: int = 1000
     timeout_precommit_ms: int = 1000
     timeout_delta_ms: int = 300
-
-
-@dataclass(frozen=True, slots=True)
-class DiscoveryConfig:
-    """Peer discovery multicast settings."""
-
-    multicast_group: str = "239.1.1.1"
-    multicast_port: int = 50000
-    beacon_interval_ms: int = 1000
-    target_degree: int = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +65,6 @@ class ScenarioConfig:
     max_txs_per_block: int
     network: NetworkConfig
     consensus: ConsensusConfig
-    discovery: DiscoveryConfig
     transactions: tuple[dict[str, Any], ...]
 
 
@@ -122,20 +109,6 @@ def _rate(mapping: dict[str, Any], name: str) -> float:
     value = float(value)
     if not 0.0 <= value <= 1.0:
         raise ConfigError(f"{name} must be between 0 and 1")
-    return value
-
-
-def _non_empty_string(mapping: dict[str, Any], name: str, default: str) -> str:
-    value = mapping.get(name, default)
-    if not isinstance(value, str) or not value:
-        raise ConfigError(f"{name} must be a non-empty string")
-    return value
-
-
-def _port(mapping: dict[str, Any], name: str, default: int) -> int:
-    value = mapping.get(name, default)
-    if type(value) is not int or not 1 <= value <= 65535:
-        raise ConfigError(f"{name} must be an integer between 1 and 65535")
     return value
 
 
@@ -252,36 +225,10 @@ def load_scenario(path: str | Path) -> ScenarioConfig:
         duplicate_rate=_rate(network_raw, "duplicate_rate"),
         gst_height=_optional_int(network_raw, "gst_height", 0),
         delta_ms=_optional_int(network_raw, "delta_ms", 500, 1),
-        target_degree=_optional_int(network_raw, "target_degree", 4, 1),
         peers=dict(peers),
     )
     if network.min_delay_ms > network.max_delay_ms:
         raise ConfigError("min_delay_ms cannot exceed max_delay_ms")
-    if network.target_degree >= num_validators:
-        raise ConfigError("network target_degree must be lower than num_validators")
-
-    discovery_raw = raw.get("discovery", {})
-    if not isinstance(discovery_raw, dict):
-        raise ConfigError("discovery must be an object")
-    discovery = DiscoveryConfig(
-        multicast_group=_non_empty_string(discovery_raw, "multicast_group", "239.1.1.1"),
-        multicast_port=_port(discovery_raw, "multicast_port", 50000),
-        beacon_interval_ms=_optional_int(discovery_raw, "beacon_interval_ms", 1000, 1),
-        target_degree=_optional_int(
-            discovery_raw,
-            "target_degree",
-            network.target_degree,
-            1,
-        ),
-    )
-    try:
-        multicast_address = ipaddress.IPv4Address(discovery.multicast_group)
-        if not multicast_address.is_multicast:
-            raise ConfigError("multicast_group must be a multicast IPv4 address")
-    except ipaddress.AddressValueError as exc:
-        raise ConfigError("multicast_group must be a valid multicast IPv4 address") from exc
-    if discovery.target_degree >= num_validators:
-        raise ConfigError("discovery target_degree must be lower than num_validators")
 
     consensus_raw = raw.get("consensus", {})
     if not isinstance(consensus_raw, dict):
@@ -328,7 +275,6 @@ def load_scenario(path: str | Path) -> ScenarioConfig:
         max_txs_per_block=max_txs_per_block,
         network=network,
         consensus=consensus,
-        discovery=discovery,
         transactions=tuple(transactions),
     )
 

@@ -116,18 +116,6 @@ def test_scenario_rejects_wrong_chain_id(tmp_path):
         load_scenario(path)
 
 
-def test_scenario_rejects_unreachable_target_degree(tmp_path):
-    path = tmp_path / "scenario.json"
-    path.write_text(
-        '{"name":"bad","seed":42,"num_validators":10,'
-        '"validators":["V0","V1","V2","V3","V4","V5","V6","V7","V8","V9"],'
-        '"max_height":1,"network":{"target_degree":10}}',
-        encoding="utf-8",
-    )
-    with pytest.raises(ConfigError, match="target_degree"):
-        load_scenario(path)
-
-
 def test_scenario_rejects_invalid_sender(tmp_path):
     path = tmp_path / "scenario.json"
     path.write_text(
@@ -150,37 +138,6 @@ def test_load_config_rejects_mismatched_pair(tmp_path):
     )
     with pytest.raises(ConfigError, match="seed"):
         load_config(scenario, ROOT / "config/genesis.json")
-
-
-def test_scenario_accepts_discovery_config(tmp_path):
-    path = tmp_path / "scenario.json"
-    path.write_text(
-        '{"name":"discovery","seed":42,"num_validators":10,'
-        '"validators":["V0","V1","V2","V3","V4","V5","V6","V7","V8","V9"],'
-        '"max_height":1,"discovery":{"multicast_group":"239.1.1.1",'
-        '"multicast_port":50000,"beacon_interval_ms":250,"target_degree":4}}',
-        encoding="utf-8",
-    )
-
-    scenario = load_scenario(path)
-
-    assert scenario.discovery.multicast_group == "239.1.1.1"
-    assert scenario.discovery.multicast_port == 50000
-    assert scenario.discovery.beacon_interval_ms == 250
-    assert scenario.discovery.target_degree == 4
-
-
-def test_scenario_rejects_invalid_discovery_group(tmp_path):
-    path = tmp_path / "scenario.json"
-    path.write_text(
-        '{"name":"bad","seed":42,"num_validators":10,'
-        '"validators":["V0","V1","V2","V3","V4","V5","V6","V7","V8","V9"],'
-        '"max_height":1,"discovery":{"multicast_group":"127.0.0.1"}}',
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ConfigError, match="multicast"):
-        load_scenario(path)
 
 
 def test_scenario_accepts_static_peer_addresses(tmp_path):
