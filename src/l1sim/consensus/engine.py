@@ -473,7 +473,8 @@ class ConsensusEngine:
         :meth:`VoteSet.add`, which checks the signature, deduplicates (rule 7)
         and detects equivocation. Votes for future rounds and heights are kept
         there until the engine reaches them. When a vote for the current height
-        is added, the engine re-checks every rule, because that vote may complete
+        is added, or is an equivocator's second vote (which counts for its own
+        value), the engine re-checks every rule, because that vote may complete
         a polka or a commit.
 
         Logged events: ``vote_rejected`` with a ``reason`` (``unknown_voter``,
@@ -484,11 +485,12 @@ class ConsensusEngine:
             vote: The received vote.
 
         Returns:
-            ``True`` only if the vote was added (it counts, now or at a later
-            round or height). ``False`` for old, duplicate, equivocating or
-            invalid votes, or when the engine is stopped. The node uses this to
-            decide whether gossip forwards the vote: an equivocating vote still
-            reaches everyone, forwarded by the nodes that received it first.
+            ``True`` if the vote now counts (now or at a later round or height):
+            a new vote, or an equivocator's first vote for another value.
+            ``False`` for old, duplicate or invalid votes, or when the
+            engine is stopped. The node uses this to decide whether gossip
+            forwards the vote, so every counted vote, a conflicting one included,
+            is forwarded exactly once and reaches nodes a Byzantine voter skipped.
         """
         if self._stopped:
             return False
@@ -510,9 +512,13 @@ class ConsensusEngine:
             self._log("equivocation_detected", **fields)
         elif result != ADDED:
             self._log("vote_rejected", reason=self._vote_rejection(vote), **fields)
-        elif vote.height == self.height:
+        # An equivocator's second vote counts for its own value (VoteSet), so it can
+        # complete a quorum just like a new vote, and must be forwarded like one: a
+        # Byzantine voter may send it to only a few nodes.
+        counted = result in (ADDED, EQUIVOCATION)
+        if counted and vote.height == self.height:
             self._progress()
-        return result == ADDED
+        return counted
 
     def on_timeout(self, height: int, round: int, step: Step) -> None:
         """Handle a timeout scheduled earlier through ``schedule_timeout``.
